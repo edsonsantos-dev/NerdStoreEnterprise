@@ -17,6 +17,15 @@ public class AuthController : MainController
     private readonly UserManager<IdentityUser> _userManager;
     private readonly AppSettings _appSettings;
 
+    public AuthController(SignInManager<IdentityUser> signInManager,
+        UserManager<IdentityUser> userManager,
+        AppSettings appSettings)
+    {
+        _signInManager = signInManager;
+        _userManager = userManager;
+        _appSettings = appSettings;
+    }
+
     [HttpPost("nova-conta")]
     public async Task<ActionResult> Registrar(UsuarioRegistro usuarioRegistro)
     {
@@ -47,8 +56,12 @@ public class AuthController : MainController
     {
         if (!ModelState.IsValid) return CustomResponse(ModelState);
 
-        var result = await _signInManager.PasswordSignInAsync(usuarioLogin.Email, usuarioLogin.Senha,
-            false, true);
+        var result = await _signInManager
+            .PasswordSignInAsync(
+                usuarioLogin.Email,
+                usuarioLogin.Senha,
+                false,
+                true);
 
         if (result.Succeeded)
             return CustomResponse(await GerarJwt(usuarioLogin.Email));
@@ -67,12 +80,17 @@ public class AuthController : MainController
     private async Task<UsuarioRespostaLogin> GerarJwt(string email)
     {
         var user = await _userManager.FindByEmailAsync(email);
-        var claims = await _userManager.GetClaimsAsync(user);
+        if (user != null)
+        {
+            var claims = await _userManager.GetClaimsAsync(user);
 
-        var identityClaims = await ObterClaimsUsuario(claims, user);
-        var encodedToken = CodificarToken(identityClaims);
+            var identityClaims = await ObterClaimsUsuario(claims, user);
+            var encodedToken = CodificarToken(identityClaims);
 
-        return ObterRespostaToken(encodedToken, user, claims);
+            return ObterRespostaToken(encodedToken, user, claims);
+        }
+
+        return null;
     }
 
     private async Task<ClaimsIdentity> ObterClaimsUsuario(ICollection<Claim> claims, IdentityUser user)
@@ -80,11 +98,20 @@ public class AuthController : MainController
         var userRoles = await _userManager.GetRolesAsync(user);
 
         claims.Add(new Claim(JwtRegisteredClaimNames.Sub, user.Id));
-        claims.Add(new Claim(JwtRegisteredClaimNames.Email, user.Email));
-        claims.Add(new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()));
-        claims.Add(new Claim(JwtRegisteredClaimNames.Nbf, ToUnixEpochDate(DateTime.UtcNow).ToString()));
-        claims.Add(new Claim(JwtRegisteredClaimNames.Iat, ToUnixEpochDate(DateTime.UtcNow).ToString(),
-            ClaimValueTypes.Integer64));
+        if (user.Email != null)
+            claims.Add(new Claim(JwtRegisteredClaimNames.Email, user.Email));
+
+        claims.Add(
+            new Claim(JwtRegisteredClaimNames.Jti,
+                Guid.NewGuid().ToString()));
+        claims.Add(
+            new Claim(JwtRegisteredClaimNames.Nbf,
+                ToUnixEpochDate(DateTime.UtcNow).ToString()));
+        claims.Add(
+            new Claim(JwtRegisteredClaimNames.Iat,
+                ToUnixEpochDate(DateTime.UtcNow).ToString(),
+                ClaimValueTypes.Integer64));
+
         foreach (var userRole in userRoles)
             claims.Add(new Claim("role", userRole));
 
@@ -106,13 +133,17 @@ public class AuthController : MainController
             Subject = identityClaims,
             Expires = DateTime.UtcNow.AddHours(_appSettings.ExpiracaoHoras),
             SigningCredentials =
-                new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
+                new SigningCredentials(new SymmetricSecurityKey(key),
+                    SecurityAlgorithms.HmacSha256Signature)
         });
 
         return tokenHandler.WriteToken(token);
     }
 
-    private UsuarioRespostaLogin ObterRespostaToken(string encodedToken, IdentityUser user, IEnumerable<Claim> claims)
+    private UsuarioRespostaLogin ObterRespostaToken(
+        string encodedToken,
+        IdentityUser user,
+        IEnumerable<Claim> claims)
     {
         return new UsuarioRespostaLogin
         {
